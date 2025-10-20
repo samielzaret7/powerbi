@@ -1,31 +1,30 @@
 AddTimes =
     let
-        WithParsedTime =
+        ParsedTime =
             Table.AddColumn(
                 ExpandFechas,
                 "StartTimeParsed",
                 (r) =>
                     let
-                        // normalize to text first
-                        rawText   = if r[StartTime] = null then null else Text.Trim(Text.From(r[StartTime])),
-                        // try: if it's already time/datetime, convert directly
-                        tryTime   = try Time.From(r[StartTime]) otherwise null,
-                        // try: parse text like "08:30 AM" using en-US (AM/PM)
-                        tryText   = if tryTime <> null then tryTime else (try Time.FromText(rawText, "en-US") otherwise null),
-                        // fallback: if still null, assume 00:00
-                        startTime = if tryText <> null then tryText else #time(0,0,0)
+                        rawStart   = r[StartTime],
+                        rawText    = if rawStart = null then null else Text.Trim(Text.From(rawStart)),
+                        tryTime    = try Time.From(rawStart),
+                        tryText    = if tryTime[HasError] then try Time.FromText(rawText, "en-US") else try tryTime,
+                        parsed     = if not tryTime[HasError] then tryTime[Value]
+                                     else if not tryText[HasError] then tryText[Value]
+                                     else null
                     in
-                        startTime,
+                        parsed,
                 type time
             ),
 
-        // Build InicioLocal / FinLocal using StartTimeParsed and DurationMin
         WithDateTimes =
-            Table.TransformColumns(
-                Table.AddColumn(
-                    WithParsedTime,
-                    "InicioLocal",
-                    (r) =>
+            Table.AddColumn(
+                ParsedTime,
+                "InicioLocal",
+                (r) =>
+                    if r[StartTimeParsed] = null then null
+                    else
                         #datetime(
                             Date.Year(r[Fechas]),
                             Date.Month(r[Fechas]),
@@ -34,16 +33,16 @@ AddTimes =
                             Time.Minute(r[StartTimeParsed]),
                             0
                         ),
-                    type datetime
-                ),
-                {} // no transforms here; just keeping structure consistent
+                type datetime
             ),
 
         WithEnd =
             Table.AddColumn(
                 WithDateTimes,
                 "FinLocal",
-                each [InicioLocal] + #duration(0, 0, Number.From([DurationMin]), 0),
+                each if [InicioLocal] = null
+                     then null
+                     else [InicioLocal] + #duration(0, 0, Number.From([DurationMin]), 0),
                 type datetime
             )
     in
