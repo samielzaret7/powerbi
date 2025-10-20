@@ -1,0 +1,90 @@
+// --- DEBUG: inspect and parse StartTime with AM/PM safely ---
+AddTimes =
+    let
+        // 1) Add a probe record per row so you can expand and inspect
+        WithProbe =
+            Table.AddColumn(
+                ExpandFechas,
+                "_Probe",
+                (r) =>
+                    let
+                        rawStart   = r[StartTime],
+                        rawType    = Value.Type(rawStart),
+                        rawText    = if rawStart = null then null else Text.Trim(Text.From(rawStart)),
+
+                        // First attempt: if it's already time/datetime
+                        tryTime    = try Time.From(rawStart),
+
+                        // Second attempt: text like "08:30 AM" (culture en-US)
+                        tryText    = if tryTime[HasError] then try Time.FromText(rawText, "en-US") else try tryTime,
+
+                        parsed     = if not tryTime[HasError] then tryTime[Value]
+                                     else if not tryText[HasError] then tryText[Value]
+                                     else null,
+
+                        errTimeMsg = if tryTime[HasError] then try tryTime[Error][Message] otherwise "error" else null,
+                        errTextMsg = if tryText[HasError] then try tryText[Error][Message] otherwise "error" else null
+                    in
+                        [
+                            StartTime_raw   = rawStart,
+                            StartTime_type  = Value.Type(rawStart),
+                            StartTime_text  = rawText,
+                            TryTime_ok      = not tryTime[HasError],
+                            TryTime_error   = errTimeMsg,
+                            TryText_ok      = not tryText[HasError],
+                            TryText_error   = errTextMsg,
+                            StartTimeParsed = parsed
+                        ],
+                type record
+            ),
+
+        // 2) Expand the probe so you can see columns in the grid
+        ExpandedProbe =
+            Table.ExpandRecordColumn(
+                WithProbe,
+                "_Probe",
+                {
+                    "StartTime_raw","StartTime_type","StartTime_text",
+                    "TryTime_ok","TryTime_error","TryText_ok","TryText_error",
+                    "StartTimeParsed"
+                },
+                {
+                    "StartTime_raw","StartTime_type","StartTime_text",
+                    "TryTime_ok","TryTime_error","TryText_ok","TryText_error",
+                    "StartTimeParsed"
+                }
+            ),
+
+        // 3) OPTIONAL: temporarily filter to the bad rows to focus on errors
+        // BadRowsOnly = Table.SelectRows(ExpandedProbe, each [StartTimeParsed] = null),
+
+        // 4) Build Inicio/Fin using the parsed time
+        WithDateTimes =
+            Table.AddColumn(
+                ExpandedProbe,
+                "InicioLocal",
+                (r) =>
+                    if r[StartTimeParsed] = null then null
+                    else
+                        #datetime(
+                            Date.Year(r[Fechas]),
+                            Date.Month(r[Fechas]),
+                            Date.Day(r[Fechas]),
+                            Time.Hour(r[StartTimeParsed]),
+                            Time.Minute(r[StartTimeParsed]),
+                            0
+                        ),
+                type datetime
+            ),
+
+        WithEnd =
+            Table.AddColumn(
+                WithDateTimes,
+                "FinLocal",
+                each if [InicioLocal] = null
+                     then null
+                     else [InicioLocal] + #duration(0, 0, Number.From([DurationMin]), 0),
+                type datetime
+            )
+    in
+        WithEnd
