@@ -1,16 +1,76 @@
--- values coming from the hovered cell (your matrix on Master_MachineSlot)
-Is Row in Hovered Slot :=
+Bot (Hovered Slot, First) :=
 VAR ServerSel    = SELECTEDVALUE ( Master_MachineSlot[Server] )
 VAR SlotStartSel = SELECTEDVALUE ( Master_MachineSlot[SlotStartLocal] )
-
--- values from the current row in the tooltip table (ScheduleSlots)
-VAR ServerRow    = SELECTEDVALUE ( ScheduleSlots[Server] )
-VAR SlotStartRow = SELECTEDVALUE ( ScheduleSlots[SlotStartLocal] )
 RETURN
 IF (
-    NOT ISBLANK(ServerSel) &&
-    NOT ISBLANK(SlotStartSel) &&
-    ServerRow = ServerSel &&
-    SlotStartRow = SlotStartSel,
-    1, 0
+    OR ( ISBLANK(ServerSel), ISBLANK(SlotStartSel) ),
+    BLANK(),
+    MINX (
+        CALCULATETABLE (
+            VALUES ( ScheduleSlots[Bot Name] ),
+            TREATAS ( { ServerSel },    ScheduleSlots[Server] ),
+            TREATAS ( { SlotStartSel }, ScheduleSlots[SlotStartLocal] )
+        ),
+        [Bot Name]
+    )
+)
+
+Comment (Hovered Slot, First) :=
+VAR ServerSel    = SELECTEDVALUE ( Master_MachineSlot[Server] )
+VAR SlotStartSel = SELECTEDVALUE ( Master_MachineSlot[SlotStartLocal] )
+RETURN
+IF (
+    OR ( ISBLANK(ServerSel), ISBLANK(SlotStartSel) ),
+    BLANK(),
+    MINX (
+        CALCULATETABLE (
+            VALUES ( ScheduleSlots[Comentarios] ),
+            TREATAS ( { ServerSel },    ScheduleSlots[Server] ),
+            TREATAS ( { SlotStartSel }, ScheduleSlots[SlotStartLocal] )
+        ),
+        [Comentarios]
+    )
+)
+
+
+
+
+
+---------------------------
+
+Bots (Hovered Slot) :=
+VAR ServerSel    = SELECTEDVALUE ( Master_MachineSlot[Server] )
+VAR SlotStartSel = SELECTEDVALUE ( Master_MachineSlot[SlotStartLocal] )
+RETURN
+IF (
+    OR ( ISBLANK(ServerSel), ISBLANK(SlotStartSel) ),
+    BLANK(),
+    CONCATENATEX (
+        CALCULATETABLE (
+            VALUES ( ScheduleSlots[Bot Name] ),
+            TREATAS ( { ServerSel },    ScheduleSlots[Server] ),
+            TREATAS ( { SlotStartSel }, ScheduleSlots[SlotStartLocal] )
+        ),
+        ScheduleSlots[Bot Name],
+        ", "
+    )
+)
+
+
+Comments (Hovered Slot) :=
+VAR ServerSel    = SELECTEDVALUE ( Master_MachineSlot[Server] )
+VAR SlotStartSel = SELECTEDVALUE ( Master_MachineSlot[SlotStartLocal] )
+RETURN
+IF (
+    OR ( ISBLANK(ServerSel), ISBLANK(SlotStartSel) ),
+    BLANK(),
+    CONCATENATEX (
+        CALCULATETABLE (
+            VALUES ( ScheduleSlots[Comentarios] ),
+            TREATAS ( { ServerSel },    ScheduleSlots[Server] ),
+            TREATAS ( { SlotStartSel }, ScheduleSlots[SlotStartLocal] )
+        ),
+        ScheduleSlots[Comentarios],
+        UNICHAR ( 10 )   -- newline between comments if multiple bots
+    )
 )
