@@ -1,11 +1,16 @@
+-- values coming from the hovered cell (your matrix on Master_MachineSlot)
 Is Row in Hovered Slot :=
 VAR ServerSel    = SELECTEDVALUE ( Master_MachineSlot[Server] )
 VAR SlotStartSel = SELECTEDVALUE ( Master_MachineSlot[SlotStartLocal] )
+
+-- values from the current row in the tooltip table (ScheduleSlots)
+VAR ServerRow    = SELECTEDVALUE ( ScheduleSlots[Server] )
+VAR SlotStartRow = SELECTEDVALUE ( ScheduleSlots[SlotStartLocal] )
 RETURN
 IF (
     NOT ISBLANK(ServerSel) &&
     NOT ISBLANK(SlotStartSel) &&
-    ScheduleSlots[Server] = ServerSel &&
-    ScheduleSlots[SlotStartLocal] = SlotStartSel,
+    ServerRow = ServerSel &&
+    SlotStartRow = SlotStartSel,
     1, 0
 )
