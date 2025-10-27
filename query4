@@ -1,0 +1,11 @@
+Is Row in Hovered Slot :=
+VAR ServerSel    = SELECTEDVALUE ( Master_MachineSlot[Server] )
+VAR SlotStartSel = SELECTEDVALUE ( Master_MachineSlot[SlotStartLocal] )
+RETURN
+IF (
+    NOT ISBLANK(ServerSel) &&
+    NOT ISBLANK(SlotStartSel) &&
+    ScheduleSlots[Server] = ServerSel &&
+    ScheduleSlots[SlotStartLocal] = SlotStartSel,
+    1, 0
+)
