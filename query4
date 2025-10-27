@@ -170,3 +170,25 @@ IF (
     FORMAT ( MinStart, "hh:mm AM/PM" ) & " - " & FORMAT ( MaxEnd, "hh:mm AM/PM" )
 )
 
+-------------------------------------------
+
+
+User (Hovered Slot) :=
+VAR ServerSel    = SELECTEDVALUE ( Master_MachineSlot[Server] )
+VAR SlotStartSel = SELECTEDVALUE ( Master_MachineSlot[SlotStartLocal] )
+VAR UserList =
+    IF (
+        OR ( ISBLANK(ServerSel), ISBLANK(SlotStartSel) ),
+        BLANK(),
+        CONCATENATEX (
+            CALCULATETABLE (
+                VALUES ( ScheduleSlots[Usuario] ),
+                TREATAS ( { ServerSel },    ScheduleSlots[Server] ),
+                TREATAS ( { SlotStartSel }, ScheduleSlots[SlotStartLocal] )
+            ),
+            ScheduleSlots[Usuario],
+            ", "
+        )
+    )
+RETURN
+IF ( ISBLANK(UserList), " ", UserList )
