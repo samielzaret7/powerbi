@@ -121,3 +121,52 @@ VAR CommentList =
     )
 RETURN
 IF ( ISBLANK(CommentList), " ", CommentList )
+
+
+
+-----------------------------
+
+Bot Full Time Range :=
+VAR ServerSel    = SELECTEDVALUE ( Master_MachineSlot[Server] )
+VAR SlotStartSel = SELECTEDVALUE ( Master_MachineSlot[SlotStartLocal] )
+
+-- Which bot (if any) is occupying this slot?
+VAR BotSel =
+    CALCULATE (
+        SELECTEDVALUE ( ScheduleSlots[Bot Name] ),
+        TREATAS ( { ServerSel },    ScheduleSlots[Server] ),
+        TREATAS ( { SlotStartSel }, ScheduleSlots[SlotStartLocal] )
+    )
+
+-- If no bot, we show “Slot is free”
+VAR HasBot = NOT ISBLANK ( BotSel )
+
+-- Get all the occupied slots for that same bot & server
+VAR BotSlots =
+    CALCULATETABLE (
+        VALUES ( ScheduleSlots[SlotStartLocal] ),
+        ScheduleSlots[Server] = ServerSel,
+        ScheduleSlots[Bot Name] = BotSel
+    )
+
+-- Find earliest start and latest end time across that bot's schedule
+VAR MinStart =
+    CALCULATE (
+        MIN ( ScheduleSlots[SlotStartLocal] ),
+        ScheduleSlots[Server] = ServerSel,
+        ScheduleSlots[Bot Name] = BotSel
+    )
+VAR MaxEnd =
+    CALCULATE (
+        MAX ( ScheduleSlots[SlotEndLocal] ),
+        ScheduleSlots[Server] = ServerSel,
+        ScheduleSlots[Bot Name] = BotSel
+    )
+
+RETURN
+IF (
+    NOT HasBot,
+    "Slot is free",
+    FORMAT ( MinStart, "hh:mm AM/PM" ) & " - " & FORMAT ( MaxEnd, "hh:mm AM/PM" )
+)
+
