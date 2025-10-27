@@ -74,3 +74,50 @@ IF (
         UNICHAR ( 10 )   -- newline between comments if multiple bots
     )
 )
+
+
+
+
+-----------------------------
+
+Bots (Hovered Slot) :=
+VAR ServerSel    = SELECTEDVALUE ( Master_MachineSlot[Server] )
+VAR SlotStartSel = SELECTEDVALUE ( Master_MachineSlot[SlotStartLocal] )
+VAR BotList =
+    IF (
+        OR ( ISBLANK(ServerSel), ISBLANK(SlotStartSel) ),
+        BLANK(),
+        CONCATENATEX (
+            CALCULATETABLE (
+                VALUES ( ScheduleSlots[Bot Name] ),
+                TREATAS ( { ServerSel },    ScheduleSlots[Server] ),
+                TREATAS ( { SlotStartSel }, ScheduleSlots[SlotStartLocal] )
+            ),
+            ScheduleSlots[Bot Name],
+            ", "
+        )
+    )
+RETURN
+IF ( ISBLANK(BotList), "Slot is free", BotList )
+
+
+
+Comments (Hovered Slot) :=
+VAR ServerSel    = SELECTEDVALUE ( Master_MachineSlot[Server] )
+VAR SlotStartSel = SELECTEDVALUE ( Master_MachineSlot[SlotStartLocal] )
+VAR CommentList =
+    IF (
+        OR ( ISBLANK(ServerSel), ISBLANK(SlotStartSel) ),
+        BLANK(),
+        CONCATENATEX (
+            CALCULATETABLE (
+                VALUES ( ScheduleSlots[Comentarios] ),
+                TREATAS ( { ServerSel },    ScheduleSlots[Server] ),
+                TREATAS ( { SlotStartSel }, ScheduleSlots[SlotStartLocal] )
+            ),
+            ScheduleSlots[Comentarios],
+            UNICHAR(10)
+        )
+    )
+RETURN
+IF ( ISBLANK(CommentList), " ", CommentList )
