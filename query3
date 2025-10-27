@@ -1,0 +1,46 @@
+let
+    // sources
+    ServersTbl = Servers,          // Server, MaxConcurrency, Ambiente, TimeZone...
+    TS        = TimeSlots,         // Date, SlotStartLocal, SlotEndLocal, SlotLabel, SlotIndexInDay, DayNameEs, DayOfWeekNum, Week Start
+    SS        = ScheduleSlots,     // Server, SlotStartLocal, Ocupado (=1), Week Start, Bot Name, ...
+
+    // 1) Aggregate occupied rows by Server x Slot
+    OccAgg = Table.Group(
+        SS,
+        {"Server", "SlotStartLocal"},
+        {{"OccupiedCount", each List.Sum([Ocupado]), Int64.Type}}
+    ),
+
+    // 2) Cartesian join: Servers × TimeSlots  (full grid of all slots per server)
+    AddSlots = Table.AddColumn(ServersTbl, "Slots", each TS),
+    ExpandGrid = Table.ExpandTableColumn(
+        AddSlots,
+        "Slots",
+        {"Date","SlotStartLocal","SlotEndLocal","SlotLabel","SlotIndexInDay","DayNameEs","DayOfWeekNum","Week Start"},
+        {"Date","SlotStartLocal","SlotEndLocal","SlotLabel","SlotIndexInDay","DayNameEs","DayOfWeekNum","Week Start"}
+    ),
+
+    // 3) Left join occupancy
+    MergeOcc = Table.NestedJoin(
+        ExpandGrid,
+        {"Server","SlotStartLocal"},
+        OccAgg,
+        {"Server","SlotStartLocal"},
+        "Occ",
+        JoinKind.LeftOuter
+    ),
+    ExpandOcc = Table.ExpandTableColumn(MergeOcc, "Occ", {"OccupiedCount"}, {"OccupiedCount"}),
+    OccFilled = Table.ReplaceValue(ExpandOcc, null, 0, Replacer.ReplaceValue, {"OccupiedCount"}),
+
+    // 4) Availability & flags (assumes MaxConcurrency exists; default to 1 if missing)
+    WithCap = Table.AddColumn(OccFilled, "Cap", each try Number.From([MaxConcurrency]) otherwise 1, Int64.Type),
+    AddAvail = Table.AddColumn(WithCap, "Available", each [Cap] - [OccupiedCount], Int64.Type),
+    AddFreeFlag = Table.AddColumn(AddAvail, "IsFree", each [Available] > 0, type logical),
+    AddFreeNum  = Table.AddColumn(AddFreeFlag, "FreeFlag", each if [Available] > 0 then 1 else 0, Int64.Type),
+
+    Final = Table.TransformColumnTypes(
+        AddFreeNum,
+        {{"Date", type date}, {"SlotStartLocal", type datetime}, {"SlotEndLocal", type datetime}, {"Week Start", type date}}
+    )
+in
+    Final
