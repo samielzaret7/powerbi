@@ -222,3 +222,87 @@ let
 in
     Tbl
 
+
+
+---------------------
+
+
+// AABotExecutionsLastNDays: fetch executions from the last N days (default 90)
+// Params:
+//   AACR   : base URL, e.g. "https://your-cr.company.com"
+//   Token  : X-Authorization from AAToken()
+//   Days   : optional number of days back (defaults to 90)
+(AACR as text, Token as text, optional Days as nullable number) as table =>
+let
+    NDays      = if Days <> null then Days else 90,
+
+    // --- Date range (UTC) ---
+    NowUtc     = DateTimeZone.UtcNow(),
+    FromUtc    = DateTimeZone.ToUtc(DateTimeZone.FixedUtcNow()) - #duration(NDays,0,0,0),
+
+    // Many AA v3 endpoints expect epoch millis in filters:
+    ToMs       = Number.RoundDown(1000 * Duration.TotalSeconds(NowUtc - #datetime(1970,1,1,0,0,0))),
+    FromMs     = Number.RoundDown(1000 * Duration.TotalSeconds(FromUtc - #datetime(1970,1,1,0,0,0))),
+
+    Url        = AACR & "/v3/activity/list",
+
+    // Page settings
+    PageLen    = 200,
+
+    // Build request body using the common v3 filter schema
+    MakeBody = (offset as number) as record =>
+        [
+          filter = [
+            operator = "AND",
+            operands = {
+              [ field = "createdOn", operator = "GREATER_THAN_EQUALS", value = FromMs ],
+              [ field = "createdOn", operator = "LESS_THAN_EQUALS",  value = ToMs   ]
+            }
+          ],
+          sort   = { [ field = "createdOn", direction = "desc" ] },
+          page   = [ offset = offset, length = PageLen ]
+        ],
+
+    // Fetch one page
+    FetchPage = (offset as number) as list =>
+        let
+            Body   = MakeBody(offset),
+            Resp   = Json.Document(
+                        Web.Contents(
+                          Url,
+                          [
+                            Headers = [
+                              #"Content-Type"    = "application/json",
+                              #"Accept"          = "application/json",
+                              #"X-Authorization" = Token
+                            ],
+                            Content = Json.FromValue(Body)
+                          ]
+                        )
+                      ),
+            Items =
+              if (Resp is record) and Record.HasFields(Resp, "list") then Resp[list]
+              else if (Resp is list) then Resp
+              else {}
+        in
+            Items,
+
+    // Iterate pages until a short page is returned
+    Pages = List.Generate(
+              () => [offset = 0, batch = FetchPage(0)],
+              each List.Count([batch]) > 0,
+              each [ offset = [offset] + PageLen, batch = FetchPage([offset] + PageLen) ],
+              each [batch]
+            ),
+
+    AllItems = List.Combine(Pages),
+    Tbl0     = Table.FromList(AllItems, Splitter.SplitByNothing(), {"Record"}),
+    // Expand *all* fields dynamically
+    Expanded =
+        if Table.RowCount(Tbl0) > 0 then
+            Table.ExpandRecordColumn(Tbl0, "Record", Record.FieldNames(Tbl0{0}[Record]))
+        else
+            Tbl0
+in
+    Expanded
+
