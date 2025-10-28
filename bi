@@ -179,3 +179,46 @@ let
 in
     RolesExpanded
 
+
+-----------------
+
+// AAUsersList_Simple: minimal loader for /v1/usermanagement/users/list
+// Usage:
+//   let
+//     Token = AAToken(AACR, AAUser, AAApiKey),
+//     Users = AAUsersList_Simple(AACR, Token)   // default body: [page=0, size=100]
+//   in Users
+(AACR as text, Token as text, optional Body as nullable record) as table =>
+let
+    Url     = AACR & "/v1/usermanagement/users/list",
+    Payload = if Body <> null then Body else [ page = 0, size = 100 ],
+    Source  = Web.Contents(
+                Url,
+                [
+                    Headers = [
+                        #"Content-Type"    = "application/json",
+                        #"X-Authorization" = Token
+                    ],
+                    Content = Json.FromValue(Payload)
+                ]
+              ),
+    ParsedTry = try Json.Document(Source) otherwise null,
+    Parsed    = if ParsedTry <> null then ParsedTry else error "Users API: response was not JSON.",
+
+    // If the API replied with an error object, raise a readable error
+    _ = if (Parsed is record) and Record.HasFields(Parsed, {"code","message"})
+        then error Error.Record("Users API", Parsed[message], Parsed)
+        else null,
+
+    // Normalize common shapes:
+    // 1) { list=[...], total=n }  2) { users=[...] }  3) [ ... ]  4) {} (empty)
+    Items =
+        if (Parsed is record) and Record.HasFields(Parsed, "list") then Parsed[list]
+        else if (Parsed is record) and Record.HasFields(Parsed, "users") then Parsed[users]
+        else if (Parsed is list) then Parsed
+        else {},
+
+    Tbl = Table.FromList(Items, Splitter.SplitByNothing(), {"Record"}, null, ExtraValues.Error)
+in
+    Tbl
+
