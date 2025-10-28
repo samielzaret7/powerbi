@@ -383,3 +383,88 @@ in
     Expanded
 
 
+
+-------------
+
+// AABotExecutionsLastNDays_ByEndTime
+// Gets executions from the last N days using /v3/activity/list
+// Filters: status = COMPLETED (change if you want), endDateTime BETWEEN [From, To]
+// Sorts by endDateTime desc. Pages until empty/short page.
+(AACR as text, Token as text, optional Days as nullable number, optional PageLen as nullable number, optional Status as nullable text) as table =>
+let
+    NDays      = if Days <> null then Days else 90,
+    PageSize   = if PageLen <> null then PageLen else 1000,
+    WantStatus = if Status <> null then Status else "COMPLETED",
+
+    // UTC window
+    NowUtc     = DateTimeZone.UtcNow(),
+    FromUtc    = NowUtc - #duration(NDays, 0, 0, 0),
+
+    // epoch ms
+    EpochBase  = #datetimezone(1970,1,1,0,0,0,0,0),
+    ToMs       = Number.RoundDown(1000 * Duration.TotalSeconds(NowUtc  - EpochBase)),
+    FromMs     = Number.RoundDown(1000 * Duration.TotalSeconds(FromUtc - EpochBase)),
+
+    Url        = AACR & "/v3/activity/list",
+
+    // Build request body following common v3 schema
+    MakeBody = (offset as number) as record =>
+        [
+          filter = [
+            operator = "AND",
+            operands = {
+              [ field = "status",       operator = "EQ",                    value = WantStatus ],
+              [ field = "endDateTime",  operator = "GREATER_THAN_EQUALS",   value = FromMs     ],
+              [ field = "endDateTime",  operator = "LESS_THAN_EQUALS",      value = ToMs       ]
+            }
+          ],
+          sort = { [ field = "endDateTime", direction = "desc" ] },
+          page = [ offset = offset, length = PageSize ]
+        ],
+
+    FetchPage = (offset as number) as list =>
+        let
+            Body  = MakeBody(offset),
+            Resp  = Json.Document(
+                        Web.Contents(
+                          Url,
+                          [
+                            Headers = [
+                              #"Content-Type"    = "application/json",
+                              #"Accept"          = "application/json",
+                              #"X-Authorization" = Token
+                            ],
+                            Content = Json.FromValue(Body)
+                          ]
+                        )
+                    ),
+            Items =
+                if (Resp is record) and Record.HasFields(Resp, "list") then Resp[list]
+                else if (Resp is list) then Resp
+                else {}
+        in
+            Items,
+
+    Pages = List.Generate(
+              () => [offset = 0, batch = FetchPage(0)],
+              each List.Count([batch]) > 0,
+              each 
+                let nextOffset = [offset] + PageSize
+                in  [offset = nextOffset, batch = FetchPage(nextOffset)],
+              each [batch]
+            ),
+
+    AllItems = List.Combine(Pages),
+    Tbl0     = Table.FromList(AllItems, Splitter.SplitByNothing(), {"Record"}),
+
+    // Expand everything first so you can prune later
+    Expanded =
+        if Table.RowCount(Tbl0) > 0 then
+            Table.ExpandRecordColumn(Tbl0, "Record", Record.FieldNames(Tbl0{0}[Record]))
+        else
+            Tbl0
+in
+    Expanded
+
+
+
