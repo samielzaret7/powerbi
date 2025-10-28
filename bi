@@ -306,3 +306,80 @@ let
 in
     Expanded
 
+
+
+------------------
+
+// AABotExecutionsLastNDays (fixed datetime math)
+(AACR as text, Token as text, optional Days as nullable number) as table =>
+let
+    NDays   = if Days <> null then Days else 90,
+
+    // UTC times
+    NowUtc  = DateTimeZone.UtcNow(),
+    FromUtc = DateTimeZone.AddDays(NowUtc, -NDays),
+
+    // Convert to epoch milliseconds
+    EpochBase = #datetimezone(1970,1,1,0,0,0,+00:00),
+    ToMs   = Number.RoundDown(1000 * Duration.TotalSeconds(NowUtc - EpochBase)),
+    FromMs = Number.RoundDown(1000 * Duration.TotalSeconds(FromUtc - EpochBase)),
+
+    Url     = AACR & "/v3/activity/list",
+    PageLen = 200,
+
+    MakeBody = (offset as number) as record =>
+        [
+          filter = [
+            operator = "AND",
+            operands = {
+              [ field = "createdOn", operator = "GREATER_THAN_EQUALS", value = FromMs ],
+              [ field = "createdOn", operator = "LESS_THAN_EQUALS",  value = ToMs ]
+            }
+          ],
+          sort = { [ field = "createdOn", direction = "desc" ] },
+          page = [ offset = offset, length = PageLen ]
+        ],
+
+    FetchPage = (offset as number) as list =>
+        let
+            Body  = MakeBody(offset),
+            Resp  = Json.Document(
+                      Web.Contents(
+                        Url,
+                        [
+                          Headers = [
+                            #"Content-Type"    = "application/json",
+                            #"Accept"          = "application/json",
+                            #"X-Authorization" = Token
+                          ],
+                          Content = Json.FromValue(Body)
+                        ]
+                      )
+                    ),
+            Items =
+                if (Resp is record) and Record.HasFields(Resp, "list") then Resp[list]
+                else if (Resp is list) then Resp
+                else {}
+        in
+            Items,
+
+    Pages = List.Generate(
+              () => [offset = 0, batch = FetchPage(0)],
+              each List.Count([batch]) > 0,
+              each [ offset = [offset] + PageLen, batch = FetchPage([offset] + PageLen) ],
+              each [batch]
+            ),
+
+    AllItems = List.Combine(Pages),
+    Tbl0     = Table.FromList(AllItems, Splitter.SplitByNothing(), {"Record"}),
+
+    // Dynamically expand all fields
+    Expanded =
+        if Table.RowCount(Tbl0) > 0 then
+            Table.ExpandRecordColumn(Tbl0, "Record", Record.FieldNames(Tbl0{0}[Record]))
+        else
+            Tbl0
+in
+    Expanded
+
+
