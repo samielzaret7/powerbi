@@ -603,6 +603,25 @@ in
     AvgMin
 
 
+------------------------
+
+let
+    Token     = AAToken(AACR, AAUser, AAApiKey),
+    Schedules = AAScheduledList(AACR, Token),
+
+    // Choose N here (your idea of 10 is good)
+    N = 10,
+
+    WithAvg = Table.AddColumn(
+        Schedules,
+        "Avg Duration (min)",
+        each AAAvgDurationForBot(AACR, Token, [fileName], N, "COMPLETED"),
+        type number
+    )
+in
+    WithAvg
+
+
 
 
 
