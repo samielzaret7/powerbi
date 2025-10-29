@@ -449,3 +449,92 @@ in
 
 
 
+--------------
+
+
+// AALastExecutionsForBot
+// Returns the last N executions (default 10) for a given bot name.
+// It auto-detects the bot-name field (automationName / botName / etc.).
+(AACR as text, Token as text, BotName as text, optional MaxRows as nullable number, optional Status as nullable text) as table =>
+let
+    N          = if MaxRows <> null then MaxRows else 10,
+    WantStatus = if Status  <> null then Status  else "COMPLETED",
+    Url        = AACR & "/v3/activity/list",
+
+    // ---- 1) Probe to detect the bot-name field from a single latest record ----
+    ProbeBody = [
+        sort = { [ field = "endDateTime", direction = "desc" ] },
+        page = [ offset = 0, length = 1 ]
+    ],
+    ProbeResp = Json.Document(
+        Web.Contents(
+            Url,
+            [
+                Headers = [
+                    #"Content-Type"    = "application/json",
+                    #"Accept"          = "application/json",
+                    #"X-Authorization" = Token
+                ],
+                Content = Json.FromValue(ProbeBody)
+            ]
+        )
+    ),
+    ProbeItems = if (ProbeResp is record) and Record.HasFields(ProbeResp, "list") then ProbeResp[list]
+                 else if (ProbeResp is list) then ProbeResp else {},
+    FirstRec   = if List.Count(ProbeItems) > 0 then ProbeItems{0} else error "No activity records found to detect bot-name field.",
+    NameField  = 
+        let
+            names      = Record.FieldNames(FirstRec),
+            candidates = {"automationName","botName","name","automation","automationTitle"},
+            matchList  = List.Intersect({names, candidates})
+        in
+            if List.Count(matchList) > 0 then matchList{0}
+            else error "Couldn’t find a bot-name field. Available fields: " & Text.Combine(names, ", "),
+
+    // ---- 2) Fetch last N rows for this bot (and optional status) ----
+    // Uses AND filter with EQ on status and bot-name, sorted by endDateTime desc
+    Body = [
+      filter = [
+        operator = "AND",
+        operands = {
+          [ field = "status",     operator = "EQ", value = WantStatus ],
+          [ field = NameField,    operator = "EQ", value = BotName    ]
+        }
+      ],
+      sort = { [ field = "endDateTime", direction = "desc" ] },
+      page = [ offset = 0, length = N ]
+    ],
+
+    Resp = Json.Document(
+        Web.Contents(
+            Url,
+            [
+                Headers = [
+                    #"Content-Type"    = "application/json",
+                    #"Accept"          = "application/json",
+                    #"X-Authorization" = Token
+                ],
+                Content = Json.FromValue(Body)
+            ]
+        )
+    ),
+
+    Items =
+        if (Resp is record) and Record.HasFields(Resp, "list") then Resp[list]
+        else if (Resp is list) then Resp
+        else {},
+
+    Tbl0 = Table.FromList(Items, Splitter.SplitByNothing(), {"Record"}),
+
+    // Expand all fields dynamically so you can see everything
+    Result =
+        if Table.RowCount(Tbl0) > 0 then
+            Table.ExpandRecordColumn(Tbl0, "Record", Record.FieldNames(Tbl0{0}[Record]))
+        else
+            Tbl0
+in
+    Result
+
+
+
+
