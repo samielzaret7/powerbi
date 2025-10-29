@@ -1,3 +1,105 @@
+// AALastNForFileName_Debug
+// Get last N executions filtered by the bot name, trying multiple candidate fields.
+// Returns expanded rows if any match; otherwise returns a single diagnostic row.
+(AACR as text, Token as text, FileName as text, optional N as nullable number) as table =>
+let
+    MaxN = if N <> null then N else 10,
+    Url  = AACR & "/v3/activity/list",
+
+    // Heuristics: schedules often have paths or extensions; keep originals AND "base"
+    BaseName =
+        let
+            lastSlash = List.Max({ Text.PositionOf(FileName, "/", Occurrence.Last), Text.PositionOf(FileName, "\\", Occurrence.Last) }),
+            justName  = if lastSlash <> -1 then Text.Range(FileName, lastSlash + 1) else FileName,
+            noExt     = if Text.Contains(justName, ".") then Text.BeforeDelimiter(justName, ".", {0}) else justName
+        in noExt,
+
+    Candidates = {
+        // try exact Schedules[fileName] first
+        [field="fileName",          value=FileName, op="EQ"],
+        [field="automationName",    value=FileName, op="EQ"],
+        [field="botName",           value=FileName, op="EQ"],
+        [field="name",              value=FileName, op="EQ"],
+        [field="automationTitle",   value=FileName, op="EQ"],
+        [field="automation",        value=FileName, op="EQ"],
+        [field="automationFileName",value=FileName, op="EQ"],
+        [field="filePath",          value=FileName, op="EQ"],
+
+        // then try CONTAINS with base name (no path, no extension)
+        [field="fileName",          value=BaseName, op="CONTAINS"],
+        [field="automationName",    value=BaseName, op="CONTAINS"],
+        [field="botName",           value=BaseName, op="CONTAINS"],
+        [field="name",              value=BaseName, op="CONTAINS"],
+        [field="automationTitle",   value=BaseName, op="CONTAINS"],
+        [field="automation",        value=BaseName, op="CONTAINS"],
+        [field="automationFileName",value=BaseName, op="CONTAINS"],
+        [field="filePath",          value=BaseName, op="CONTAINS"]
+    },
+
+    Fetch = (fld as text, op as text, val as text) as list =>
+        let
+            Body = [
+                filter = [ field = fld, operator = op, value = val ],
+                sort   = { [ field = "endDateTime", direction = "desc" ] },
+                page   = [ offset = 0, length = MaxN ]
+            ],
+            Resp = Json.Document(
+                      Web.Contents(
+                        Url,
+                        [
+                          Headers = [
+                            #"Content-Type"    = "application/json",
+                            #"Accept"          = "application/json",
+                            #"X-Authorization" = Token
+                          ],
+                          Content = Json.FromValue(Body)
+                        ]
+                      )
+                   ),
+            Items =
+                if (Resp is record) and Record.HasFields(Resp, "list") then Resp[list]
+                else if (Resp is list) then Resp
+                else {}
+        in
+            Items,
+
+    // try each candidate until one returns rows
+    TryAll =
+        List.Generate(
+            () => [i=0, got={}],
+            each [i] < List.Count(Candidates) and List.Count([got]) = 0,
+            each [
+                i = [i] + 1,
+                got = let c = Candidates{[i]} in @Fetch(c[field], c[op], c[value])
+            ],
+            each [got]
+        ),
+
+    Items = if List.Count(TryAll) > 0 then TryAll{ List.Count(TryAll) - 1 } else {},
+    Tbl0  = Table.FromList(Items, Splitter.SplitByNothing(), {"Record"}),
+
+    Result =
+        if Table.RowCount(Tbl0) > 0 then
+            Table.ExpandRecordColumn(Tbl0, "Record", Record.FieldNames(Tbl0{0}[Record]))
+        else
+            // Diagnostics table so you can see what's happening
+            let
+                tried = Table.FromList(
+                            List.Transform(Candidates, each "field=" & _[field] & ", op=" & _[op] & ", value=" & (if _[value] = FileName then "<FileName>" else "<BaseName>")),
+                            Splitter.SplitByNothing(), {"tried"}
+                        ),
+                info  = #table({"message","fileName","baseName"}, {{"No rows returned for any candidate filter.", FileName, BaseName}}),
+                diag  = Table.Combine({info, tried})
+            in
+                diag
+in
+    Result
+
+----------------
+
+
+
+
 // AAToken (fixed): Returns the Control Room JWT token (text)
 (AACR as text, AAUser as text, AAApiKey as text) as text =>
 let
