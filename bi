@@ -1,3 +1,130 @@
+// AALastN_ByFileName_Status
+// Returns the last N executions for a given fileName and status (default COMPLETED)
+(AACR as text, Token as text, FileName as text, optional N as nullable number, optional Status as nullable text) as table =>
+let
+    MaxN       = if N <> null then N else 10,
+    WantStatus = if Status <> null then Status else "COMPLETED",
+    Url        = AACR & "/v3/activity/list",
+
+    Body = [
+      filter = [
+        operator = "and",
+        operands = {
+          [ field = "fileName", operator = "eq", value = FileName ],
+          [ field = "status",   operator = "eq", value = WantStatus ]
+        }
+      ],
+      sort = { [ field = "endDateTime", direction = "desc" ] },
+      page = [ offset = 0, length = MaxN ]
+    ],
+
+    Resp  = Json.Document(
+              Web.Contents(
+                Url,
+                [
+                  Headers = [
+                    #"Content-Type"    = "application/json",
+                    #"Accept"          = "application/json",
+                    #"X-Authorization" = Token
+                  ],
+                  Content = Json.FromValue(Body)
+                ]
+              )
+            ),
+    Items =
+        if (Resp is record) and Record.HasFields(Resp, "list") then Resp[list]
+        else if (Resp is list) then Resp
+        else {},
+
+    Tbl0  = Table.FromList(Items, Splitter.SplitByNothing(), {"Record"}),
+    Out   =
+        if Table.RowCount(Tbl0) > 0 then
+            Table.ExpandRecordColumn(Tbl0, "Record", Record.FieldNames(Tbl0{0}[Record]))
+        else
+            Tbl0
+in
+    Out
+
+
+
+
+
+
+------------------------
+
+
+
+
+
+
+// AAAvgDurationForFileName
+// Returns a single number: average (endDateTime - startDateTime) in minutes
+(AACR as text, Token as text, FileName as text, optional N as nullable number, optional Status as nullable text) as nullable number =>
+let
+    Runs   = AALastN_ByFileName_Status(AACR, Token, FileName, N, Status),
+    // startDateTime / endDateTime expected as epoch millis (number)
+    AddDur = if Table.HasColumns(Runs, {"startDateTime","endDateTime"})
+             then Table.AddColumn(Runs, "durationMin",
+                      each let s = try [startDateTime] otherwise null,
+                               e = try [endDateTime]   otherwise null
+                           in if (s is number) and (e is number) and (e > s)
+                              then (e - s) / 60000.0 else null,
+                      type number)
+             else Runs,
+    AvgMin = if Table.HasColumns(AddDur, "durationMin")
+             then let col = Table.Column(AddDur, "durationMin"),
+                      clean = List.RemoveNulls(col)
+                  in  if List.Count(clean) > 0 then Number.Round(List.Average(clean), 2) else null
+             else null
+in
+    AvgMin
+
+
+
+
+-------------------
+
+let
+    Token     = AAToken(AACR, AAUser, AAApiKey),
+    Schedules = AAScheduledList(AACR, Token),
+
+    N = 10, // your choice
+
+    WithAvg = Table.AddColumn(
+        Schedules,
+        "Avg Duration (min)",
+        each AAAvgDurationForFileName(AACR, Token, [fileName], N, "COMPLETED"),
+        type number
+    )
+in
+    WithAvg
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // AALastNForFileName_Debug
 // Get last N executions filtered by the bot name, trying multiple candidate fields.
 // Returns expanded rows if any match; otherwise returns a single diagnostic row.
