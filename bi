@@ -536,5 +536,73 @@ in
     Result
 
 
+---------------------
+
+
+// AAAvgDurationForBot
+// Returns a single number: the average duration (minutes) of the last N executions
+// for the given bot (matched on fileName), optionally filtered by status (default COMPLETED).
+(AACR as text, Token as text, FileName as text, optional N as nullable number, optional Status as nullable text) as nullable number =>
+let
+    MaxN       = if N <> null then N else 10,
+    WantStatus = if Status <> null then Status else "COMPLETED",
+    Url        = AACR & "/v3/activity/list",
+
+    // Request body: filter by fileName (and status), sort by endDateTime desc, take N
+    Body = [
+      filter = [
+        operator = "AND",
+        operands = {
+          [ field = "fileName",     operator = "EQ", value = FileName ],
+          [ field = "status",       operator = "EQ", value = WantStatus ]
+        }
+      ],
+      sort = { [ field = "endDateTime", direction = "desc" ] },
+      page = [ offset = 0, length = MaxN ]
+    ],
+
+    Resp   = Json.Document(
+               Web.Contents(
+                 Url,
+                 [
+                   Headers = [
+                     #"Content-Type"    = "application/json",
+                     #"Accept"          = "application/json",
+                     #"X-Authorization" = Token
+                   ],
+                   Content = Json.FromValue(Body)
+                 ]
+               )
+             ),
+    Items  =
+        if (Resp is record) and Record.HasFields(Resp, "list") then Resp[list]
+        else if (Resp is list) then Resp
+        else {},
+
+    // Compute durations in minutes from epoch-millis fields
+    DurList =
+        if Items is list then
+            List.Transform(
+                Items,
+                (r) =>
+                    let
+                        s = try r[startDateTime] otherwise null,
+                        e = try r[endDateTime]   otherwise null,
+                        d = if (s is number) and (e is number) and (e > s)
+                            then (e - s) / 60000.0
+                            else null
+                    in
+                        d
+            )
+        else
+            {},
+
+    Clean  = List.RemoveNulls(DurList),
+    AvgMin = if List.Count(Clean) > 0 then Number.Round(List.Average(Clean), 2) else null
+in
+    AvgMin
+
+
+
 
 
