@@ -1,0 +1,303 @@
+// Assumes you already have:
+//   MasterList         (has column: #"Record.runAsUserIds" with comma-separated IDs)
+//   UserListTable = UserList (has columns: id, firstName, lastName)
+
+// 1) Build an id -> "First Last" lookup (keys as text)
+let
+    Users_WithFullName =
+        Table.AddColumn(
+            Table.TransformColumns(UserListTable, {{"firstName", each Text.From(_), type text}, {"lastName", each Text.From(_), type text}}),
+            "FullName",
+            each Text.Combine(List.Select({Text.Trim([firstName]), Text.Trim([lastName])}, each _ <> ""), " "),
+            type text
+        ),
+    Users_Lookup =
+        Table.TransformColumns(
+            Table.SelectColumns(Users_WithFullName, {"id","FullName"}),
+            {{"id", each Text.From(_), type text}}
+        ),
+    Keys = Users_Lookup[id],
+    Vals = Users_Lookup[FullName],
+    IdNameMap = Record.FromList(Vals, Keys),
+
+// 2) Add a column to MasterList mapping runAsUserIds -> comma-separated names
+    Master_WithRunAsNames =
+        Table.AddColumn(
+            MasterList,
+            "runAsUsers",
+            each
+                let
+                    raw   = try Text.From([#"Record.runAsUserIds"]) otherwise "",
+                    ids   = List.RemoveNulls(
+                               List.Transform(
+                                   Text.Split(Text.Replace(Text.Trim(raw), " ", ""), ","),
+                                   each if _ <> "" then _ else null
+                               )
+                           ),
+                    names = List.Transform(ids, each Record.FieldOrDefault(IdNameMap, _, _)),
+                    out   = if List.Count(names) > 0 then Text.Combine(names, ", ") else null
+                in
+                    out,
+            type text
+        )
+in
+    Master_WithRunAsNames
+
+
+
+----------------
+
+This is what I did
+
+I got error
+
+“The field ‘10’ already exists in the record. Details:
+Name =10
+Value=
+
+
+
+--------------
+
+
+// Assumes:
+//   MasterList (has column: #"Record.runAsUserIds" with comma-separated IDs)
+//   UserListTable = UserList (has columns: id, firstName, lastName)
+
+// Build unique id -> "First Last" map
+let
+    Users_WithFullName =
+        Table.AddColumn(
+            Table.TransformColumns(
+                UserListTable,
+                {{"id", each Text.From(_), type text}, {"firstName", each Text.From(_), type text}, {"lastName", each Text.From(_), type text}}
+            ),
+            "FullName",
+            each Text.Combine(List.Select({Text.Trim([firstName]), Text.Trim([lastName])}, each _ <> ""), " "),
+            type text
+        ),
+    Users_Lookup =
+        Table.Distinct(
+            Table.SelectColumns(Users_WithFullName, {"id","FullName"}),
+            {"id"}
+        ),
+    Keys = Users_Lookup[id],
+    Vals = Users_Lookup[FullName],
+    IdNameMap = Record.FromList(Vals, Keys),
+
+    // Map runAsUserIds -> comma-separated names
+    Master_WithRunAsNames =
+        Table.AddColumn(
+            MasterList,
+            "runAsUsers",
+            each
+                let
+                    raw   = try Text.From([#"Record.runAsUserIds"]) otherwise "",
+                    ids   = List.Distinct(
+                               List.RemoveNulls(
+                                   List.Transform(
+                                       Text.Split(Text.Replace(Text.Trim(raw), " ", ""), ","),
+                                       each if _ <> "" then _ else null
+                                   )
+                               )
+                           ),
+                    names = List.Transform(ids, each Record.FieldOrDefault(IdNameMap, _, _)),
+                    out   = if List.Count(names) > 0 then Text.Combine(names, ", ") else null
+                in
+                    out,
+            type text
+        )
+in
+    Master_WithRunAsNames
+
+
+___________[
+
+
+The problem is with Master_WithRunAsNames. 
+
+I tried each line until the names=…
+
+This where the following error is generated
+
+“We cannot convert the value 10 to type Text
+Details:
+Value=10
+Type=[Type]”
+
+
+
+____________
+
+
+// Build id -> "First Last" map (keys as text)
+let
+    Users_WithFullName =
+        Table.AddColumn(
+            Table.TransformColumns(
+                UserListTable,
+                {{"id", each Text.From(_), type text}, {"firstName", each Text.From(_), type text}, {"lastName", each Text.From(_), type text}}
+            ),
+            "FullName",
+            each Text.Combine(List.Select({Text.Trim([firstName]), Text.Trim([lastName])}, each _ <> ""), " "),
+            type text
+        ),
+    Users_Lookup =
+        Table.Distinct(Table.SelectColumns(Users_WithFullName, {"id","FullName"}), {"id"}),
+    IdNameMap = Record.FromList(Users_Lookup[FullName], Users_Lookup[id]),
+
+    // Map Record.runAsUserIds -> comma-separated names (robust to number/list/text/null)
+    Master_WithRunAsNames =
+        Table.AddColumn(
+            MasterList,
+            "runAsUsers",
+            each
+                let
+                    raw = try [#"Record.runAsUserIds"] otherwise null,
+
+                    // Normalize to a list of TEXT ids
+                    idsText =
+                        if raw = null then {}
+                        else if raw is list then List.Transform(raw, each Text.From(_))
+                        else if raw is number then { Text.From(raw) }
+                        else if raw is text then
+                            let
+                                parts = Text.Split(raw, ","),
+                                trimmed = List.Transform(parts, each Text.Trim(_)),
+                                nonempty = List.Select(trimmed, each _ <> "")
+                            in
+                                nonempty
+                        else {},
+
+                    idsDistinct = List.Distinct(idsText),
+
+                    // Lookup names; key must be text
+                    names = List.Transform(idsDistinct, each Record.FieldOrDefault(IdNameMap, _, _)),
+
+                    out = if List.Count(names) > 0 then Text.Combine(names, ", ") else null
+                in
+                    out,
+            type text
+        )
+in
+    Master_WithRunAsNames
+
+
+__________
+
+This is what I have 
+
+The runAsUsers column has the id, but not the full name. I need the FullName
+
+// Build id -> "First Last" map (ensure id is text) and replace runAsUserIds with names
+let
+    Users_WithFullName =
+        Table.AddColumn(
+            Table.TransformColumns(
+                UserListTable,
+                {{"id", each Text.From(_), type text}, {"firstName", each Text.From(_), type text}, {"lastName", each Text.From(_), type text}}
+            ),
+            "FullName",
+            each Text.Combine(List.Select({Text.Trim([firstName]), Text.Trim([lastName])}, each _ <> ""), " "),
+            type text
+        ),
+    Users_Lookup =
+        Table.Distinct(Table.SelectColumns(Users_WithFullName, {"id","FullName"}), {"id"}),
+
+    // IMPORTANT: Keys must be ids, Values must be FullName (not the other way around)
+    Keys = Users_Lookup[id],
+    Vals = Users_Lookup[FullName],
+    IdNameMap = Record.FromList(Vals, Keys),
+
+    Master_WithRunAsNames =
+        Table.AddColumn(
+            MasterList,
+            "runAsUsers",
+            each
+                let
+                    raw = try [#"Record.runAsUserIds"] otherwise null,
+
+                    // normalize to a list of TEXT ids
+                    idsText =
+                        if raw = null then {}
+                        else if raw is list then List.Transform(raw, each Text.From(_))
+                        else if raw is number then { Text.From(raw) }
+                        else if raw is text then
+                            let
+                                parts = Text.Split(raw, ","),
+                                trimmed = List.Transform(parts, each Text.Trim(_)),
+                                nonempty = List.Select(trimmed, each _ <> "")
+                            in
+                                nonempty
+                        else {},
+
+                    idsDistinct = List.Distinct(idsText),
+
+                    // lookup names by id; fallback is the id itself if not found
+                    names = List.Transform(idsDistinct, each Record.FieldOrDefault(IdNameMap, _, _)),
+
+                    out = if List.Count(names) > 0 then Text.Combine(names, ", ") else null
+                in
+                    out,
+            type text
+        )
+in
+    Master_WithRunAsNames
+
+
+works works works
+
+
+---------
+
+Great! It worked.
+
+Now I’m using Date.DayOfWeekName(_, “en-US)
+
+The problem is that the day of week is in three letter format (all in caps)
+
+For example
+
+MON
+TUE
+
+
+_________
+
+
+AddDates =
+    Table.AddColumn(
+        CleanDaysNoNull,
+        "Fechas",
+        (r) =>
+            let
+                // robust US-style parsing
+                sdRaw   = try Date.FromText(Text.From(r[Record.startDate]), "en-US") otherwise null,
+                edRaw   = try Date.FromText(Text.From(r[Record.endDate]),  "en-US") otherwise null,
+
+                start   = if sdRaw = null or sdRaw < FechaInicio then FechaInicio else sdRaw,
+                edTemp  = if edRaw = null then FechaFin else edRaw,
+                finish  = if edTemp > FechaFin then FechaFin else edTemp,
+
+                daysCnt = Duration.Days(finish - start) + 1,
+                allDays = if daysCnt <= 0 then {} else List.Dates(start, daysCnt, #duration(1,0,0,0)),
+
+                // incoming like "MON","TUE",...
+                dowText = Text.Upper(Text.Trim(Text.From(r[Record.weeklyRecurrence.daysOfWeek]))),
+
+                // keep dates whose abbrev matches (e.g., "MON")
+                matchDays =
+                    if (dowText = null) or (dowText = "") or List.IsEmpty(allDays) then
+                        {}
+                    else
+                        List.Select(
+                            allDays,
+                            each Text.Upper(Date.ToText(_, "ddd", "en-US")) = dowText
+                        )
+            in
+                matchDays,
+        type list
+    )
+
+
+
